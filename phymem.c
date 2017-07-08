@@ -9,12 +9,16 @@
 #include <unistd.h>
 #include <limits.h>
 
-/*
- * -f	path
- * -a	address
- * -s	size
- * -w	width
- */
+static const char* help_msg =
+"Usage: phymem [OPTION]\n"
+"  -a      physical address                       default: 0\n"
+"  -s      size                                   default: 4\n"
+"  -w      accessing width by bytes. 1, 2 or 4.   default: 4\n"
+"  -f      path of device file                    default: /dev/mem\n"
+"\n"
+"Example: phymem -a 0x80000000 -s 32 -w 4\n"
+"         phymem -a 0x80000000 -s 32 -w 1\n"
+;
 
 typedef struct PhyMem PhyMem;
 struct PhyMem
@@ -29,7 +33,7 @@ struct PhyMem
 	off_t offset;
 };
 
-void __getopt(int argc, char* argv[], PhyMem* phy_mem)
+static void __getopt(int argc, char* argv[], PhyMem* phy_mem)
 {
 	int opt;
 
@@ -39,7 +43,7 @@ void __getopt(int argc, char* argv[], PhyMem* phy_mem)
 	phy_mem->size = 0x4;
 	phy_mem->width = 0x4;
 
-    while ((opt = getopt(argc, argv, "f:a:s:w:")) != -1) {
+    while ((opt = getopt(argc, argv, "f:a:s:w:h")) != -1) {
         switch (opt) {
         case 'f':
 			strcpy(phy_mem->path, optarg);
@@ -53,6 +57,10 @@ void __getopt(int argc, char* argv[], PhyMem* phy_mem)
         case 'w':
             phy_mem->width = strtoull(optarg, NULL, 0);
             break;
+        case 'h':
+            fprintf(stdout, "%s", help_msg);
+            exit(EXIT_SUCCESS);
+            break;
         default:
             fprintf(stderr, "Usage: %s [-a physical_address] [-s size]\n", argv[0]);
             exit(EXIT_FAILURE);
@@ -60,7 +68,7 @@ void __getopt(int argc, char* argv[], PhyMem* phy_mem)
     }
 }
 
-void __map(PhyMem* phy_mem)
+static void __map(PhyMem* phy_mem)
 {
     size_t pagesize = sysconf(_SC_PAGE_SIZE);
     off_t page_base = (phy_mem->address / pagesize) * pagesize;
@@ -82,7 +90,7 @@ void __map(PhyMem* phy_mem)
 	close(fd);
 }
 
-void __unmap(PhyMem* phy_mem)
+static void __unmap(PhyMem* phy_mem)
 {
 	if(munmap(phy_mem->mapped_address, phy_mem->mapped_size) == -1)
 	{
@@ -91,30 +99,31 @@ void __unmap(PhyMem* phy_mem)
 	}
 }
 
-#define DUMP(addr, offset, len, type, format)											\
+#define DUMP(phy_addr, log_addr, len, type, format)										\
 do																						\
 { 																						\
 	size_t i;																			\
 																						\
     for (i = 0; i < len / sizeof(type); i++)											\
 	{																					\
-		type* ptr = (type*)&(addr[offset + i * sizeof(type)]);							\
-		printf("0x%p: " format "\n", ptr, *ptr);										\
+		type* phy_ptr = (type*)&(((unsigned char*)phy_addr)[i * sizeof(type)]);			\
+		type* log_ptr = (type*)&(((unsigned char*)log_addr)[i * sizeof(type)]);			\
+		printf("%p: " format "\n", phy_ptr, *log_ptr);									\
 	}																					\
 }while(0);																				\
 
-void __dump(PhyMem* phy_mem)
+static void __dump(PhyMem* phy_mem)
 {
 	switch(phy_mem->width)
 	{
 		case 1:
-			DUMP(phy_mem->mapped_address, phy_mem->offset, phy_mem->size, uint8_t, "0x%02x");
+			DUMP(phy_mem->address, phy_mem->mapped_address + phy_mem->offset, phy_mem->size, uint8_t, "0x%02x");
 			break;
 		case 2:
-			DUMP(phy_mem->mapped_address, phy_mem->offset, phy_mem->size, uint16_t, "0x%04x");
+			DUMP(phy_mem->address, phy_mem->mapped_address + phy_mem->offset, phy_mem->size, uint16_t, "0x%04x");
 			break;
 		case 4:
-			DUMP(phy_mem->mapped_address, phy_mem->offset, phy_mem->size, uint32_t, "0x%08x");
+			DUMP(phy_mem->address, phy_mem->mapped_address + phy_mem->offset, phy_mem->size, uint32_t, "0x%08x");
 			break;
 		default:
             fprintf(stderr, "Invalid width\n");
